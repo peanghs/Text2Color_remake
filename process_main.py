@@ -2,7 +2,10 @@ import torch
 import os
 import pickle
 
+# from import는 그 내부 함수가 여러군데서 존재할 수 있기 때문
+# util 과 data_loader의 함수명은 그래서 글로벌하게 유일해야 함
 from util import *
+from data_loader import *
 
 
 class main_solver(object):
@@ -18,7 +21,8 @@ class main_solver(object):
         if mode == 'train_t2p':
             # 데이터 로드
             self.input_dict = self.prepare_dict()
-            t2ploader
+            # 리턴이 train_loader, test_loader 이므로 train_loaer 만 받고 뒤는 무시
+            self.train_loader, _ = t2ploader(self.args.batch_size, self.input_dict)
 
 
 
