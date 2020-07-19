@@ -19,15 +19,15 @@ class CA_NET(nn.Module):
         logvar = x[:, :, self.c_dim:]
         return mu, logvar
 
-    def reparametrize(self, mu, logvar):
-        std = logvar.mul(0.5).exp_()
-        std_size = std.size()
-        #여기까지
-        if torch.device == 'cpu':
-            eps = torch.FloatTensor.normal_
-        else:
-            eps = torch.cuda.FloatTensor(std.size()).
-        return eps * std + mu
+    # def reparametrize(self, mu, logvar):
+    #     std = logvar.mul(0.5).exp_()
+    #     std_size = std.size()
+    #     #여기까지
+    #     if torch.device == 'cpu':
+    #         eps = torch.FloatTensor.normal_
+    #     else:
+    #         eps = torch.cuda.FloatTensor(std.size()).
+    #     return eps * std + mu
 
 
 

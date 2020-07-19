@@ -11,7 +11,7 @@ from data_loader import *
 class main_solver(object):
     def __init__(self, args):
         self.args = args
-        self.device = torch.device('cuda' if torch.cuda.is_availavble() else 'cpu')
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print('---cuda mode---') if torch.cuda.is_available() else print('---cpu mode---')
         os.chdir('D:/Pycharm Project/Text2Color_remake') # 기본 경로 변경(상대경로 입력 시)
         self.build_model(args.mode)
