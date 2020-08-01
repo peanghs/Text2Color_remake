@@ -41,7 +41,8 @@ class main_solver(object):
             # 생성기와 판별기 빌드
             self.encorder = T2P.EncoderRNN(self.input_dict.new_word_index, self.args.hidden_size,
                                            self.args.n_layers, self.args.dropout_p, Pre_emb).to(self.device)
-            self.decoder = T2P.AttnDecoderRNN
+            self.decoder = T2P.AttnDecoderRNN(self.input_dict, self.args.hidden_size,
+                                              self.args.n_layers, self.args.dropout_p).to(self.device)
 
 
 
