@@ -6,6 +6,7 @@ import pickle
 # util 과 data_loader의 함수명은 그래서 글로벌하게 유일해야 함
 from util import *
 from data_loader import *
+from model import T2P
 
 
 class main_solver(object):

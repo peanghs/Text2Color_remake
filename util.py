@@ -68,7 +68,7 @@ class Embed(nn.Module):
             self.embed.requires_grad = False
 
     def forward(self, doc):
-        #
+        # doc 에 임베딩 업데이트
         doc = self.embed(doc)
         return doc
 
