@@ -24,11 +24,11 @@ class CA_NET(nn.Module):
         # https://ratsgo.github.io/generative%20model/2018/01/27/VAE/
         std = logvar.mul(0.5).exp_()
         std_size = std.size()
-        # eps = torch.cuda.FloatTensor(std.size()).normal_(0.0, 1)
-        if torch.device == 'cpu':
-            eps = torch.FloatTensor(std.size()).normal_(0.0, 1) # 여기 하다 맘
-        else:
-            eps = torch.cuda.FloatTensor(std.size()).normal_(0.0, 1)
+        eps = torch.cuda.FloatTensor(std.size()).normal_(0.0, 1)
+        # if torch.device == 'cpu':
+        #     eps = torch.FloatTensor(std.size()).normal_(0.0, 1) # 여기 하다 맘
+        # else:
+        #     eps = torch.cuda.FloatTensor(std.size()).normal_(0.0, 1)
         return eps * std + mu
 
     def forward(self, text_embedding):
@@ -78,20 +78,21 @@ class AttnDecoderRNN(nn.Module):
         self.gru = nn.GRUCell(self.hidden_size + self.palette_dim, hidden_size)
 
         self.out = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size), nn.ReLu(inplace=True),
+            nn.Linear(hidden_size, hidden_size), nn.ReLU(inplace=True),
             nn.BatchNorm1d(hidden_size), nn.Linear(hidden_size, self.palette_dim))
 
     def forward(self, last_palette, last_decoder_hidden, encoder_outputs, each_input_size, i):
 
         if i == 0:
-            context = torch.mean(encoder_outputs, dim=1, keepdim=True)
+            attn_weights = self.attn(last_decoder_hidden.squeeze(0), encoder_outputs, each_input_size)
+            context = torch.mean(encoder_outputs, dim=0, keepdim=True)
             # cat 1 은 추가 행이 아니라 뒤로 잇는 것..
             # 그래서 last_palette랑 context 가 뒤에서 2번째 모양이 같아야 함
-            gru_input = torch.cat((last_palette, context.squeeze(1)), 1)
+            gru_input = torch.cat((last_palette, context.squeeze(0)), 1)
             gru_hidden = self.gru(gru_input, last_decoder_hidden)
 
-            palette = self.out(gru_hidden.squeeze(0))
-            return palette, context.unsqueeze(0), gru_hidden
+            palette = self.out(gru_hidden.squeeze(1))
+            return palette, context.unsqueeze(1), gru_hidden, attn_weights
 
         else:
             attn_weights = self.attn(last_decoder_hidden.squeeze(0), encoder_outputs, each_input_size)
@@ -118,8 +119,7 @@ class Attn(nn.Module):
         seq_len = encoder_output.size(0)
         batch_size = encoder_output.size(1)
         #cpu 환경 일단 지원
-        attn_energies = torch.zeros(seq_len, batch_size, 1).cuda() if torch.device == 'cuda' else \
-            torch.zeros(seq_len, batch_size, 1)
+        attn_energies = torch.zeros(seq_len, batch_size, 1).cuda()
 
         for i in range(seq_len):
             attn_energies[i] = self.score(hidden, encoder_output[i])
@@ -135,5 +135,25 @@ class Attn(nn.Module):
 
         return energy
 
+class Discriminator(nn.Module):
+    # 호출할 때 15 와 self.args.hidden_size 를 넣어줘서 color_size 와 hidden_dim을 직접 정의하지 않았음
+    def __init__(self, color_size, hidden_dim):
+        super(Discriminator, self).__init__()
+        curr_dim = color_size+hidden_dim
 
+        layers = []
+        layers.append(nn.Linear(curr_dim, int(curr_dim / 2)))
+        layers.append(nn.ReLU(inplace=True))
+        layers.append(nn.Linear(int(curr_dim / 2), int(curr_dim / 4)))
+        layers.append(nn.ReLU(inplace=True))
+        layers.append(nn.Linear(int(curr_dim / 4), int(curr_dim / 8)))
+        layers.append(nn.ReLU(inplace=True))
+        layers.append(nn.Linear(int(curr_dim / 8), 1))  # 9 -> 1
+        layers.append(nn.Sigmoid())
 
+        self.main = nn.Sequential(*layers)
+
+    def forward(self, color, text):
+        out = torch.cat([color, text], dim=1)  # color: batch x 15, text: batch x 150
+        out2 = self.main(out)
+        return out2.squeeze(1)

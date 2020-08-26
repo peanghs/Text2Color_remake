@@ -15,6 +15,8 @@ def main(args):
     if args.mode == 'train_t2p':
         solver.train_t2p()
 
+    if args.mode == 'test_t2p':
+        solver.test_t2p()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -22,12 +24,46 @@ if __name__ == '__main__':
     # 공통
     parser.add_argument('--mode', type=str, default='train_t2p',
                         choices=['train_t2p', 'train_PCN', 'test_t2p', 'test_text2colors'])
-
-    parser.add_argument('--batch_size', type=int, default=32, help='batch size for training')
-    # text2palette
+    parser.add_argument('--dataset', type=str, default='bird256', choices=['imagenet', 'bird256'])
 
     # 경로
     parser.add_argument('--t2p_dir', type=str, default='./models/T2P')
+    parser.add_argument('--train_sample_dir', type=str, default='./samples/train')
+    parser.add_argument('--test_sample_dir', type=str, default='./samples/test')
+
+
+    # 모델 설정
+    parser.add_argument('--num_epochs', type=int, default=1000, help='number of epochs for training')
+    parser.add_argument('--dropout_p', type=float, default=0.2)
+    parser.add_argument('--batch_size', type=int, default=32, help='batch size for training')
+    parser.add_argument('--lr', type=float, default=5e-4, help='initial learning rate')
+
+    # 학습 관련
+    parser.add_argument('--beta1', type=float, default=0.5)
+    parser.add_argument('--beta2', type=float, default=0.99)
+    parser.add_argument('--weight_decay', type=float, default=5e-5)
+    parser.add_argument('--lambda_sL1', type=float, default=100.0, help='weight for L1 loss')
+    parser.add_argument('--lambda_KL', type=float, default=0.5, help='weight for KL loss')
+
+    #저장 관련
+    parser.add_argument('--log_interval', type=int, default=1,
+                        help='how many steps to wait before logging training status')
+    parser.add_argument('--sample_interval', type=int, default=20,
+                        help='how many steps to wait before saving the training output')
+    parser.add_argument('--save_interval', type=int, default=50,
+                        help='how many steps to wait before saving the trained models')
+
+
+    # 실행 관련
+    parser.add_argument('--resume_epoch', type=int, default=None, help='resume training from this epoch')
+    # 테스트 시 모델을 불러오려면 입력해줘야 함
+    parser.add_argument('--model_epoch', type=int, default=None, help='입력된 에폭의 모델을 불러옵니다')
+
+    # text2palette 개별 설정
+    parser.add_argument('--hidden_size', type=int, default=150)
+    parser.add_argument('--n_layers', type=int, default=1)
+
+
 
     args = parser.parse_args()
     print(args)

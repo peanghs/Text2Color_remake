@@ -30,8 +30,9 @@ class PAT_Dataset(data.Dataset):
                 rgb = np.array([palette[0], palette[1], palette[2]]) / 255.0
                 warnings.filterwarnings("ignore") # 경고 메시지 숨기기
                 # rgb를 lab 으로 변경 왜 d50(상관색 온도 5003K 일몰 이라함)을 썼는지는 모름
+                # 색상이 좀 더 명확해지는듯
                 # rgb2lab 이 2d는 못받아드리는듯 하여 폈다 다시 3개씩 잘라서 기록
-                lab = rgb2lab(rgb[np.newaxis, np.newaxis, :]).flatten() # illuminant='d50' 일단 빼봄
+                lab = rgb2lab(rgb[np.newaxis, np.newaxis, :], illuminant='D50').flatten() # illuminant='d50' 일단 빼봄
                 temp.append(lab[0])
                 temp.append(lab[1])
                 temp.append(lab[2])
@@ -67,3 +68,66 @@ def t2p_loader(batch_size, input_dict):
                                                drop_last=True, shuffle=False)
     return train_loader, test_loader
 
+def test_loader(dataset, batch_size, input_dict):
+    if dataset == 'bird256':
+        txt_path = './data/hexcolor_vf/test_names.pkl'
+        pal_path = './data/hexcolor_vf/test_palettes_rgb.pkl'
+        img_path = './data/bird256/test_palette/test_images_origin.txt'
+        test_dataset = Test_Dataset(input_dict, txt_path, pal_path, img_path)
+        test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False,
+                                                  num_workers=4)
+        imsize = 256
+
+    return test_loader, imsize
+
+class Test_Dataset(data.Dataset):
+    def __init__(self, input_dict, txt_path, pal_path, img_path, transform=None):
+        self.transform = transform
+        with open(img_path, 'rb') as f:
+            self.images = np.asarray(pickle.load(f)) / 255
+        with open(txt_path, 'rb') as fin:
+            self.name_seqs = pickle.load(fin)
+        with open(pal_path, 'rb') as fin:
+            self.palette_seqs = pickle.load(fin)
+
+        # ==================== name_seqs 프로세싱 ====================#
+        # Return a list of indexes, one for each word in the sentence.
+        words_index = []
+        for index, palette_name in enumerate(self.name_seqs):
+            # Set list size to the longest palette name.
+            temp = [0] * input_dict.max_len
+            for i, word in enumerate(palette_name):
+                temp[i] = input_dict.word2index[word]
+            words_index.append(temp)
+
+        self.name_seqs = torch.LongTensor(words_index)
+
+        # ==================== palette_seqs 프로세싱 ====================#
+        palette_list = []
+        for palettes in self.palette_seqs:
+            temp = []
+            for palette in palettes:
+                rgb = np.array([palette[0], palette[1], palette[2]]) / 255.0
+                warnings.filterwarnings("ignore")
+                lab = rgb2lab(rgb[np.newaxis, np.newaxis, :], illuminant='D50').flatten() # illuminant='D50' 위에서 빼서 여기도 뺌
+                temp.append(lab[0])
+                temp.append(lab[1])
+                temp.append(lab[2])
+            palette_list.append(temp)
+
+        self.palette_seqs = torch.FloatTensor(palette_list)
+
+        self.num_total_data = len(self.name_seqs)
+
+    def __len__(self):
+        return self.num_total_data
+
+    def __getitem__(self, idx):
+        """Returns one data pair."""
+        text = self.name_seqs[idx]
+        palette = self.palette_seqs[idx]
+        image = self.images[idx]
+        if self.transform:
+            image = self.transform(image)
+
+        return text, palette, image

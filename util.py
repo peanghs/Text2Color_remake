@@ -1,9 +1,13 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import warnings
+from skimage.color import lab2rgb, rgb2lab
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# ======================== 텍스트 임베딩 ======================== #
 
 class Dictionary:
     def __init__(self):
@@ -59,11 +63,11 @@ class Embed(nn.Module):
         self.embed = nn.Embedding(vocab_size, embed_dim)
 
         if Pre_emb is not None:
-            print("사전에 학습된 단어 임베딩을 사용합니다")
+            print("사전에 학습된 단어 임베딩을 사용합니다...")
             self.embed.weight = nn.Parameter(Pre_emb)
 
         if train_emb == False:
-            print("사전 학습된 단어 임베딩이 없습니다")
+            print("사전 학습된 단어 임베딩이 없습니다...")
             # requires_grad : 텐서의 모든 연산을 미분함
             self.embed.requires_grad = False
 
@@ -73,3 +77,23 @@ class Embed(nn.Module):
         return doc
 
 
+# ============================= Etc. ============================= #
+
+def init_weights_normal(m):
+    if type(m) == nn.Conv1d:
+        m.weight.data.normal_(0.0, 0.05)
+    if type(m) == nn.Linear:
+        m.weight.data.normal_(0.0, 0.05)
+
+def KL_loss(mu, logvar):
+    KLD_element = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
+    KLD = torch.mean(KLD_element).mul_(-0.5)
+    return KLD
+
+def lab2rgb_1d(in_lab, clip=True):
+    warnings.filterwarnings("ignore")
+
+    tmp_rgb = lab2rgb(in_lab[np.newaxis, np.newaxis, :], illuminant='D50').flatten() # 위에서 지웠으므로.. illuminant='D50'
+    if clip:
+        tmp_rgb = np.clip(tmp_rgb, 0, 1)
+    return tmp_rgb
