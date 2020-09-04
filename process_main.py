@@ -11,7 +11,7 @@ matplotlib.use('Agg')
 # util 과 data_loader의 함수명은 그래서 글로벌하게 유일해야 함
 from util import *
 from data_loader import *
-from model import T2P
+from model import T2P, P2C
 
 
 class main_solver(object):
@@ -36,6 +36,25 @@ class main_solver(object):
         for i in range(len(text_data)):
             input_dict.index_elements(text_data[i])
         return input_dict
+
+    def prepare_data(self, images, palettes, always_give_global_hint, add_L):
+        # p2c 에서 사용
+        batch = images.size(0)
+        imsize = images.size(3)
+
+        inputs, labels = process_image(images, batch, imsize)
+        if add_L:
+            for_global = process_palette_lab(palettes, batch)
+            global_hint = process_global_lab(for_global, batch, always_give_global_hint)
+        else:
+            for_global = process_palette_ab(palettes, batch)
+            global_hint = process_global_ab(for_global, batch, always_give_global_hint)
+
+        inputs = inputs.to(self.device)
+        labels = labels.to(self.device)
+        global_hint = (global_hint).expand(-1, -1, imsize, imsize).to(self.device)
+        return inputs, labels, global_hint
+
 
     def build_model(self, mode):
 
@@ -91,20 +110,37 @@ class main_solver(object):
                 Pre_emb = torch.from_numpy(Pre_emb)
                 # 모델 저장
                 torch.save(Pre_emb, emb_file)
-        Pre_emb = Pre_emb.to(self.device)
+            Pre_emb = Pre_emb.to(self.device)
 
-        # 데이터 호출
-        self.test_loader, self.imsize = test_loader(self.args.dataset, self.args.batch_size, self.input_dict)
+            # 데이터 호출
+            self.test_loader, self.imsize = test_loader(self.args.dataset, self.args.batch_size, self.input_dict)
 
-        # 학습된 제너레이터 호출
-        self.encoder = T2P.EncoderRNN(self.input_dict.new_word_index, self.args.hidden_size,
-                                  self.args.n_layers, self.args.dropout_p, Pre_emb).to(self.device)
-        self.decoder_T2P = T2P.AttnDecoderRNN(self.input_dict, self.args.hidden_size,
-                                    self.args.n_layers, self.args.dropout_p).to(self.device)
+            # 학습된 제너레이터 호출
+            self.encoder = T2P.EncoderRNN(self.input_dict.new_word_index, self.args.hidden_size,
+                                      self.args.n_layers, self.args.dropout_p, Pre_emb).to(self.device)
+            self.decoder_T2P = T2P.AttnDecoderRNN(self.input_dict, self.args.hidden_size,
+                                        self.args.n_layers, self.args.dropout_p).to(self.device)
+
+        elif mode == 'train_p2c':
+            # 데이터 불러오기
+            self.train_loader, imsize = p2c_loader(self.args.dataset, self.args.batch_size, 0)
+
+            # 생성기와 판별기 빌드
+            self.decoder = P2C.UNet(imsize, self.args.add_L).to(self.device)
+            self.discriminator = P2C.Discriminator(self.args.add_L, imsize).to(self.device)
+
+            # 옵티마이저
+            self.decoder_optimizer = torch.optim.Adam(self.decoder.parameters(), lr=self.args.lr,
+                                                      weight_decay=self.args.weight_decay)
+            self.discriminator_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.args.lr,
+                                                            weight_decay=self.args.weight_decay)
+            self.decoder_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.decoder_optimizer, 'min',
+                                                                                patience=5, factor=0.1)
+            self.discriminator_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.discriminator_optimizer,
+                                                                                      'min', patience=5, factor=0.1)
 
     def load_model(self, mode, resume_epoch):
         if mode == 'train_t2p':
-            print(f'모델을 불러오고 {format(resume_epoch)} 에폭부터 학습을 재개합니다...')
             encoder_path = os.path.join(self.args.t2p_dir, '{}_G_encoder.ckpt'.format(resume_epoch))
             decoder_path = os.path.join(self.args.t2p_dir, '{}_G_decoder.ckpt'.format(resume_epoch))
             discriminator_path = os.path.join(self.args.t2p_dir, '{}_D.ckpt'.format(resume_epoch))
@@ -120,6 +156,13 @@ class main_solver(object):
             self.encoder.load_state_dict(torch.load(encoder_path, map_location=lambda storage, loc: storage))
             self.decoder_T2P.load_state_dict(torch.load(decoder_path, map_location=lambda storage, loc: storage))
 
+        elif mode == 'train_p2c':
+            decoder_path = os.path.join(self.args.p2c_dir, '{}_G.ckpt'.format(resume_epoch))
+            discriminator_path = os.path.join(self.args.p2c_dir, '{}_D.ckpt'.format(resume_epoch))
+            self.decoder.load_state_dict(torch.load(decoder_path, map_location=lambda storage, loc: storage))
+            self.discriminator.load_state_dict(torch.load(discriminator_path, map_location=lambda storage,
+                                                                                                  loc: storage))
+
 
 
     def train_t2p(self):
@@ -130,14 +173,16 @@ class main_solver(object):
         # 학습 시작
         start_epoch = 0
         if self.args.resume_epoch:
+            print(f'모델을 불러오고 {format(self.args.resume_epoch)} 에폭부터 학습을 시작합니다...')
             start_epoch = self.args.resume_epoch
             self.load_model(self.args.mode, self.args.resume_epoch)
+        else:
+            print('신규 학습을 시작합니다...')
 
         self.encoder.train()
         self.decoder.train()
         self.discriminator.train()
 
-        print('학습을 시작합니다...')
         #시작 시간 저장
         start_time = time.time()
         for epoch in range(start_epoch, self.args.num_epochs):
@@ -268,7 +313,7 @@ class main_solver(object):
             real_palettes = real_palettes.to(self.device).float()
 
             # Generate multiple palettes from same text input.
-            for num_gen in range(10):
+            for num_gen in range(1): # 이미지당 만드는 개수 -> 10 에서 1로 수정
 
                 # Prepare input and output variables.
                 palette = torch.FloatTensor(batch_size, 3).zero_().to(self.device)
@@ -317,3 +362,82 @@ class main_solver(object):
                                                                         num_gen + 1)))
                     print('테스트 [{}], 문단 [{}]에 대한 결과 [{}]을/를 저장했습니다.'.format(
                         self.args.batch_size * batch_idx + x + 1, input_text, num_gen + 1))
+
+    def train_p2c(self):
+        # Loss function.
+        criterion_GAN = nn.BCELoss()
+        criterion_smoothL1 = nn.SmoothL1Loss()
+
+        start_epoch = 0
+        if self.args.resume_epoch:
+            print(f'모델을 불러오고 {format(self.args.resume_epoch)} 에폭부터 학습을 시작합니다...')
+            start_epoch = self.args.resume_epoch
+            self.load_model(self.args.mode, self.args.resume_epoch)
+        else:
+            print('신규 학습을 시작합니다...')
+
+        self.decoder.train()
+        self.discriminator.train()
+
+        # 시작 시간 저장
+        start_time = time.time()
+        for epoch in range(start_epoch, self.args.num_epochs):
+            for i, (images, palettes) in enumerate(self.train_loader):
+                # 트레이닝 데이터 준비
+                palettes = palettes.view(-1, 5, 3).cpu().data.numpy()
+                inputs, real_images, global_hint = self.prepare_data(images, palettes, self.args.always_give_global_hint,
+                                                                     self.args.add_L)
+                batch_size = inputs.size(0)
+
+                # BCE 손실 계산을 위한 라벨 준비
+                real_labels = torch.ones(batch_size).to(self.device)
+                fake_labels = torch.zeros(batch_size).to(self.device)
+
+                # =============================== 판별기 학습 =============================== #
+                # 진짜 이미지 BCE 손실 계산
+                real = self.discriminator(torch.cat((real_images, global_hint), dim=1))
+                real = real.squeeze() # 차원이 안맞아 추가함
+                d_loss_real = criterion_GAN(real, real_labels)
+
+                # 가짜 이미지 BCE 손실 계산
+                fake_images = self.decoder(inputs, global_hint) # global_hint
+                fake = self.discriminator(torch.cat((fake_images, global_hint), dim=1))
+                # fake = fake.squeeze()
+                d_loss_fake = criterion_GAN(fake, fake_labels)
+
+                d_loss = (d_loss_real + d_loss_fake) * self.args.lambda_GAN
+
+                # Backprop and optimize.
+                self.discriminator_optimizer.zero_grad()
+                d_loss.backward()
+                self.discriminator_optimizer.step()
+
+                # ================================ 디코더 학습 ================================= #
+                # Compute BCE loss (fool the discriminator).
+                fake_images = self.decoder(inputs, global_hint)
+                fake = self.discriminator(torch.cat((fake_images, global_hint), dim=1))
+                g_loss_GAN = criterion_GAN(fake, real_labels)
+
+                # Compute smooth L1 loss.
+                outputs = fake_images.view(batch_size, -1)
+                labels = real_images.contiguous().view(batch_size, -1)
+                g_loss_smoothL1 = criterion_smoothL1(outputs, labels)
+
+                g_loss = g_loss_GAN * self.args.lambda_GAN + g_loss_smoothL1
+
+                # Backprop and optimize.
+                self.decoder_optimizer.zero_grad()
+                g_loss.backward()
+                self.decoder_optimizer.step()
+
+            if (epoch + 1) % self.args.log_interval == 0:
+                elapsed_time = time.time() - start_time
+                print('소요 시간 [{:.4f}], 에폭 [{}/{}], 판별기_loss: {:.6f}, 생성기_loss: {:.6f}'.format(
+                    elapsed_time, (epoch + 1), self.args.num_epochs, d_loss.item(), g_loss.item()))
+
+            if (epoch + 1) % self.args.save_interval == 0:
+                torch.save(self.decoder.state_dict(),
+                           os.path.join(self.args.p2c_dir, '{}_G.ckpt'.format(epoch + 1)))
+                torch.save(self.discriminator.state_dict(),
+                           os.path.join(self.args.p2c_dir, '{}_D.ckpt'.format(epoch + 1)))
+                print('모델 체크포인트를 저장합니다...')

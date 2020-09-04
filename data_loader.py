@@ -68,6 +68,40 @@ def t2p_loader(batch_size, input_dict):
                                                drop_last=True, shuffle=False)
     return train_loader, test_loader
 
+def p2c_loader(dataset, batch_size, idx=0):
+    # 이미지넷은 데이터 구성이 어떻게 되는지 모르겠음..
+    if dataset == 'imagenet':
+        train_img_path = './data/imagenet/train_palette_set_origin/train_images_%d.txt' % (idx)
+        train_pal_path = './data/imagenet/train_palette_set_origin/train_palette_%d.txt' % (idx)
+        train_dataset = Image_Dataset(train_img_path, train_pal_path)
+        train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True,
+                                                   num_workers= 4) # num_workers=4
+        imsize = 256
+
+    elif dataset == 'bird256':
+        train_img_path = './data/bird256/train_palette/train_images_origin.txt'
+        train_pal_path = './data/bird256/train_palette/train_palette_origin.txt'
+        train_dataset = Image_Dataset(train_img_path, train_pal_path)
+        train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True,
+                                                   num_workers= 4) # num_workers=4
+        imsize = 256
+
+    return train_loader, imsize
+
+class Image_Dataset(data.Dataset):
+    def __init__(self, image_dir, pal_dir):
+        with open(image_dir, 'rb') as f:
+            self.image_data = np.asarray(pickle.load(f)) / 255
+        with open(pal_dir, 'rb') as f:
+            self.pal_data = rgb2lab(np.asarray(pickle.load(f)).reshape(-1, 5, 3) / 256, illuminant='D50')
+        self.data_size = self.image_data.shape[0]
+
+    def __len__(self):
+        return self.data_size
+
+    def __getitem__(self, idx):
+        return self.image_data[idx], self.pal_data[idx]
+
 def test_loader(dataset, batch_size, input_dict):
     if dataset == 'bird256':
         txt_path = './data/hexcolor_vf/test_names.pkl'
