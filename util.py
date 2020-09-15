@@ -34,11 +34,13 @@ def load_pretrained_embedding(dictionary, embed_file, embed_dim):
     if embed_file is None:
         return None
 
+    # fasttext 적용
     pretrained_embed ={}
     with open(embed_file, 'r', encoding='utf-8') as f:
         for line in f:
             tokens = line.split(' ')
             word = tokens[0]
+            # 공백이 자꾸 들어가서 그냥 301으로 자름 원래는 [1:]
             entries = tokens[1:]
             if word == '<unk>':
                 continue

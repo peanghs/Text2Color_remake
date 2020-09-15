@@ -27,20 +27,23 @@ if __name__ == '__main__':
     # 공통
     parser.add_argument('--mode', type=str, default='train_t2p',
                         choices=['train_t2p', 'train_p2c', 'test_t2p', 'test_text2colors'])
+    parser.add_argument('--language', type=str, default='eng', choices=['eng', 'kor'])
     parser.add_argument('--dataset', type=str, default='bird256', choices=['imagenet', 'bird256'])
 
     # 경로
     parser.add_argument('--t2p_dir', type=str, default='./models/T2P')
-    parser.add_argument('--train_sample_dir', type=str, default='./samples/train')
-    parser.add_argument('--test_sample_dir', type=str, default='./samples/test')
+    parser.add_argument('--train_sample_dir_eng', type=str, default='./samples/train/eng')
+    parser.add_argument('--train_sample_dir_kor', type=str, default='./samples/train/kor')
+    parser.add_argument('--test_sample_dir_eng', type=str, default='./samples/test/eng')
+    parser.add_argument('--test_sample_dir_kor', type=str, default='./samples/test/kor')
     parser.add_argument('--p2c_dir', type=str, default='./models/P2C')
 
 
     # 모델 설정
     parser.add_argument('--num_epochs', type=int, default=1000, help='number of epochs for training')
-    parser.add_argument('--dropout_p', type=float, default=0.1) #0.2
+    parser.add_argument('--dropout_p', type=float, default=0.05) #0.2
     parser.add_argument('--batch_size', type=int, default=32, help='batch size for training')
-    parser.add_argument('--lr', type=float, default=0.01, help='initial learning rate') #5e-4
+    parser.add_argument('--lr', type=float, default=5e-5, help='initial learning rate') #5e-4
 
     # 학습 관련
     parser.add_argument('--beta1', type=float, default=0.5)

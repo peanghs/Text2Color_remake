@@ -4,6 +4,7 @@ import pickle
 import time
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 # 그림 저장 시 창으로 열리는것 방지
 matplotlib.use('Agg')
 
@@ -24,7 +25,10 @@ class main_solver(object):
 
     def prepare_dict(self):
         input_dict = Dictionary()
-        src_path = os.path.join('./data/hexcolor_vf/all_names.pkl')
+        if self.args.language == 'kor':
+            src_path = os.path.join('./data/hexcolor_vf/kor_all_names.pkl')
+        else:
+            src_path = os.path.join('./data/hexcolor_vf/all_names.pkl')
         print(os.path.abspath(src_path))
         with open(src_path, 'rb') as f:
             text_data = pickle.load(f)
@@ -62,24 +66,30 @@ class main_solver(object):
             # 데이터 로드
             self.input_dict = self.prepare_dict()
             # 리턴이 train_loader 와 test_loader 이므로 test_loader는 받지 않음
-            self.train_loader, _ = t2p_loader(self.args.batch_size, self.input_dict)
+            self.train_loader, _ = t2p_loader(self.args.batch_size, self.input_dict, self.args.language)
 
             # 전이 학습할 Glove 임베딩 불러오기
             # 사전 학습된 데이터가 있는 경우 그걸 사용
-            emb_file = os.path.join('./data/Color-Hex-vf.pth')
+            if self.args.language == 'kor':
+                emb_file = os.path.join('./data/Color-Hex-vf-kr.pth')
+            else:
+                emb_file = os.path.join('./data/Color-Hex-vf.pth')
             if os.path.isfile(emb_file):
                 Pre_emb = torch.load(emb_file)
             else:
                 # 사전, 파일, 차원 순으로 호출해야 함
-                Pre_emb = load_pretrained_embedding(self.input_dict.word2index,
-                                                    './data/glove.840B.300d.txt', 300)
+                if self.args.language == 'kor':
+                    # fasttext 썼는데 905 단어만 걸려서 기존것으로 대체 // 기존은 1041/
+                    Pre_emb = load_pretrained_embedding(self.input_dict.word2index, './data/glove_kor.txt', 100)
+                else:
+                    Pre_emb = load_pretrained_embedding(self.input_dict.word2index, './data/glove.840B.300d.txt', 300)
                 Pre_emb = torch.from_numpy(Pre_emb)
                 torch.save(Pre_emb, emb_file)
             Pre_emb = Pre_emb.to(self.device)
 
             # 생성기와 판별기 빌드
             self.encoder = T2P.EncoderRNN(self.input_dict.new_word_index, self.args.hidden_size,
-                                           self.args.n_layers, self.args.dropout_p, Pre_emb).to(self.device)
+                                           self.args.n_layers, self.args.dropout_p, Pre_emb, self.args.language).to(self.device)
             self.decoder = T2P.AttnDecoderRNN(self.input_dict, self.args.hidden_size,
                                               self.args.n_layers, self.args.dropout_p).to(self.device)
             # 15는 color_size
@@ -102,22 +112,30 @@ class main_solver(object):
             self.input_dict = self.prepare_dict()
 
             # 글로브 임베딩 호출
-            emb_file = os.path.join('./data', 'Color-Hex-vf.pth')
+            if self.args.language == 'kor':
+                emb_file = os.path.join('./data', 'Color-Hex-vf-kr.pth')
+            else:
+                emb_file = os.path.join('./data', 'Color-Hex-vf.pth')
             if os.path.isfile(emb_file):
                 Pre_emb = torch.load(emb_file)
             else:
-                Pre_emb = load_pretrained_embedding(self.input_dict.word2index, './data/glove.840B.300d.txt', 300)
+                if self.args.language == 'kor':
+                    # fasttext 썼는데 905 단어만 걸려서 기존것으로 대체
+                    # Pre_emb = load_pretrained_embedding(self.input_dict.word2index, './data/wiki.ko.vec', 300)
+                    Pre_emb = load_pretrained_embedding(self.input_dict.word2index, './data/glove_kor.txt', 100)
+                else:
+                    Pre_emb = load_pretrained_embedding(self.input_dict.word2index, './data/glove.840B.300d.txt', 300)
                 Pre_emb = torch.from_numpy(Pre_emb)
                 # 모델 저장
                 torch.save(Pre_emb, emb_file)
             Pre_emb = Pre_emb.to(self.device)
 
             # 데이터 호출
-            self.test_loader, self.imsize = test_loader(self.args.dataset, self.args.batch_size, self.input_dict)
-
+            self.test_loader, self.imsize = test_loader(self.args.dataset, self.args.batch_size, self.input_dict,
+                                                        self.args.language)
             # 학습된 제너레이터 호출
             self.encoder = T2P.EncoderRNN(self.input_dict.new_word_index, self.args.hidden_size,
-                                      self.args.n_layers, self.args.dropout_p, Pre_emb).to(self.device)
+                                      self.args.n_layers, self.args.dropout_p, Pre_emb, self.args.language).to(self.device)
             self.decoder_T2P = T2P.AttnDecoderRNN(self.input_dict, self.args.hidden_size,
                                         self.args.n_layers, self.args.dropout_p).to(self.device)
 
@@ -141,9 +159,14 @@ class main_solver(object):
 
     def load_model(self, mode, resume_epoch):
         if mode == 'train_t2p':
-            encoder_path = os.path.join(self.args.t2p_dir, '{}_G_encoder.ckpt'.format(resume_epoch))
-            decoder_path = os.path.join(self.args.t2p_dir, '{}_G_decoder.ckpt'.format(resume_epoch))
-            discriminator_path = os.path.join(self.args.t2p_dir, '{}_D.ckpt'.format(resume_epoch))
+            if self.args.language == 'kor':
+                encoder_path = os.path.join(self.args.t2p_dir, '{}_G_encoder_kor.ckpt'.format(resume_epoch))
+                decoder_path = os.path.join(self.args.t2p_dir, '{}_G_decoder_kor.ckpt'.format(resume_epoch))
+                discriminator_path = os.path.join(self.args.t2p_dir, '{}_D_kor.ckpt'.format(resume_epoch))
+            else:
+                encoder_path = os.path.join(self.args.t2p_dir, '{}_G_encoder.ckpt'.format(resume_epoch))
+                decoder_path = os.path.join(self.args.t2p_dir, '{}_G_decoder.ckpt'.format(resume_epoch))
+                discriminator_path = os.path.join(self.args.t2p_dir, '{}_D.ckpt'.format(resume_epoch))
             self.encoder.load_state_dict(torch.load(encoder_path, map_location=lambda storage, loc: storage))
             self.decoder.load_state_dict(torch.load(decoder_path, map_location=lambda storage, loc: storage))
             self.discriminator.load_state_dict(torch.load(discriminator_path, map_location=lambda storage,
@@ -151,8 +174,12 @@ class main_solver(object):
 
         elif mode == 'test_t2p':
             print(f'{format(resume_epoch)} 에폭의 모델로 테스트를 시작합니다...')
-            encoder_path = os.path.join(self.args.t2p_dir, '{}_G_encoder.ckpt'.format(resume_epoch))
-            decoder_path = os.path.join(self.args.t2p_dir, '{}_G_decoder.ckpt'.format(resume_epoch))
+            if self.args.language == 'kor':
+                encoder_path = os.path.join(self.args.t2p_dir, '{}_G_encoder_kor.ckpt'.format(resume_epoch))
+                decoder_path = os.path.join(self.args.t2p_dir, '{}_G_decoder_kor.ckpt'.format(resume_epoch))
+            else:
+                encoder_path = os.path.join(self.args.t2p_dir, '{}_G_encoder.ckpt'.format(resume_epoch))
+                decoder_path = os.path.join(self.args.t2p_dir, '{}_G_decoder.ckpt'.format(resume_epoch))
             self.encoder.load_state_dict(torch.load(encoder_path, map_location=lambda storage, loc: storage))
             self.decoder_T2P.load_state_dict(torch.load(decoder_path, map_location=lambda storage, loc: storage))
 
@@ -166,6 +193,12 @@ class main_solver(object):
 
 
     def train_t2p(self):
+        # matplotlib 한글 폰트 설정
+        if self.args.language == 'kor':
+            font_fname = 'C:/Windows/Fonts/MALGUNSL.ttf'
+            font_family = font_manager.FontProperties(fname=font_fname).get_name()
+            plt.rcParams["font.family"] = font_family
+
         # loss function
         criterion_GAN = nn.BCELoss()
         criterion_smoothL1 = nn.SmoothL1Loss()
@@ -263,7 +296,10 @@ class main_solver(object):
                     input_text = ''
                     for idx in txt_embeddings[x]:
                         if idx.item() == 0: break
-                        input_text += self.input_dict.index2word[idx.item()] + " "
+                        if self.args.language == 'kor':
+                            input_text += self.input_dict.index2word[idx.item()]
+                        else:
+                            input_text += self.input_dict.index2word[idx.item()] + ' '
                     axs1[0].set_title(input_text)
                     for k in range(5):
                         lab = np.array([fake_palettes.data[x][3 * k],
@@ -272,9 +308,12 @@ class main_solver(object):
                         rgb = lab2rgb_1d(lab)
                         axs1[k].imshow([[rgb]])
                         axs1[k].axis('off')
-
-                    fig1.savefig(os.path.join(self.args.train_sample_dir,
+                    if self.args.language == 'kor':
+                        fig1.savefig(os.path.join(self.args.train_sample_dir_kor,
                                               'epoch{}_sample{}.jpg'.format(epoch + 1, x + 1)))
+                    else:
+                        fig1.savefig(os.path.join(self.args.train_sample_dir_eng,
+                                                  'epoch{}_sample{}.jpg'.format(epoch + 1, x + 1)))
                     plt.close()
                 print('학습 샘플을 저장합니다...')
 
@@ -285,15 +324,32 @@ class main_solver(object):
                     d_loss.item(), g_loss.item()))
 
             if (epoch + 1) % self.args.save_interval == 0:
-                torch.save(self.encoder.state_dict(),
-                           os.path.join(self.args.t2p_dir, '{}_G_encoder.ckpt'.format(epoch + 1)))
-                torch.save(self.decoder.state_dict(),
-                           os.path.join(self.args.t2p_dir, '{}_G_decoder.ckpt'.format(epoch + 1)))
-                torch.save(self.discriminator.state_dict(),
-                           os.path.join(self.args.t2p_dir, '{}_D.ckpt'.format(epoch + 1)))
+                if self.args.language == 'kor':
+                    torch.save(self.encoder.state_dict(),
+                               os.path.join(self.args.t2p_dir, '{}_G_encoder_kor.ckpt'.format(epoch + 1)))
+                    torch.save(self.decoder.state_dict(),
+                               os.path.join(self.args.t2p_dir, '{}_G_decoder_kor.ckpt'.format(epoch + 1)))
+                    torch.save(self.discriminator.state_dict(),
+                               os.path.join(self.args.t2p_dir, '{}_D_kor.ckpt'.format(epoch + 1)))
+
+                else:
+                    torch.save(self.encoder.state_dict(),
+                               os.path.join(self.args.t2p_dir, '{}_G_encoder.ckpt'.format(epoch + 1)))
+                    torch.save(self.decoder.state_dict(),
+                               os.path.join(self.args.t2p_dir, '{}_G_decoder.ckpt'.format(epoch + 1)))
+                    torch.save(self.discriminator.state_dict(),
+                               os.path.join(self.args.t2p_dir, '{}_D.ckpt'.format(epoch + 1)))
+
                 print('모델 체크 포인트를 저장합니다...')
 
     def test_t2p(self):
+
+        # matplotlib 한글 폰트 설정
+        if self.args.language == 'kor':
+            font_fname = 'C:/Windows/Fonts/MALGUNSL.ttf'
+            font_family = font_manager.FontProperties(fname=font_fname).get_name()
+            plt.rcParams["font.family"] = font_family
+
         # 모델 호출
         if self.args.model_epoch:
             self.load_model(self.args.mode, self.args.model_epoch)
@@ -313,7 +369,7 @@ class main_solver(object):
             real_palettes = real_palettes.to(self.device).float()
 
             # Generate multiple palettes from same text input.
-            for num_gen in range(1): # 이미지당 만드는 개수 -> 10 에서 1로 수정
+            for num_gen in range(3): # 이미지당 만드는 개수 -> 10 에서 3로 수정
 
                 # Prepare input and output variables.
                 palette = torch.FloatTensor(batch_size, 3).zero_().to(self.device)
@@ -336,11 +392,14 @@ class main_solver(object):
                     input_text = ''
                     for idx in txt_embeddings[x]:
                         if idx.item() == 0: break
-                        input_text += self.input_dict.index2word[idx.item()] + ' '
+                        if self.args.language == 'kor':
+                            input_text += self.input_dict.index2word[idx.item()]
+                        else:
+                            input_text += self.input_dict.index2word[idx.item()] + ' '
 
                     # Save palette generation results.
                     fig1, axs1 = plt.subplots(nrows=2, ncols=5)
-                    axs1[0][0].set_title(input_text + 'fake {}'.format(num_gen + 1))
+                    axs1[0][0].set_title(input_text + ' fake {}'.format(num_gen + 1))
                     for k in range(5):
                         lab = np.array([fake_palettes.data[x][3 * k],
                                         fake_palettes.data[x][3 * k + 1],
@@ -348,7 +407,7 @@ class main_solver(object):
                         rgb = lab2rgb_1d(lab)
                         axs1[0][k].imshow([[rgb]])
                         axs1[0][k].axis('off')
-                    axs1[1][0].set_title(input_text + 'real')
+                    axs1[1][0].set_title(input_text + ' real')
                     for k in range(5):
                         lab = np.array([real_palettes.data[x][3 * k],
                                         real_palettes.data[x][3 * k + 1],
@@ -356,8 +415,12 @@ class main_solver(object):
                         rgb = lab2rgb_1d(lab)
                         axs1[1][k].imshow([[rgb]])
                         axs1[1][k].axis('off')
-
-                    fig1.savefig(os.path.join(self.args.test_sample_dir, self.args.mode,
+                    if self.args.language == 'kor':
+                        fig1.savefig(os.path.join(self.args.test_sample_dir_kor, self.args.mode,
+                                              '{}_palette{}.jpg'.format(self.args.batch_size * batch_idx + x + 1,
+                                                                        num_gen + 1)))
+                    else:
+                        fig1.savefig(os.path.join(self.args.test_sample_dir_eng, self.args.mode,
                                               '{}_palette{}.jpg'.format(self.args.batch_size * batch_idx + x + 1,
                                                                         num_gen + 1)))
                     print('테스트 [{}], 문단 [{}]에 대한 결과 [{}]을/를 저장했습니다.'.format(

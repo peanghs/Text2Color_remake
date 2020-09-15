@@ -53,10 +53,14 @@ class PAT_Dataset(data.Dataset):
 
 
 
-def t2p_loader(batch_size, input_dict):
-    train_name_path = os.path.join('./data/hexcolor_vf/train_names.pkl')
+def t2p_loader(batch_size, input_dict, language):
+    if language == 'kor':
+        train_name_path = os.path.join('./data/hexcolor_vf/kor_train_names.pkl')
+        test_name_path = os.path.join('./data/hexcolor_vf/kor_test_names.pkl')
+    else:
+        train_name_path = os.path.join('./data/hexcolor_vf/train_names.pkl')
+        test_name_path = os.path.join('./data/hexcolor_vf/test_names.pkl')
     train_palette_path = os.path.join('./data/hexcolor_vf/train_palettes_rgb.pkl')
-    test_name_path = os.path.join('./data/hexcolor_vf/test_names.pkl')
     test_palette_path = os.path.join('./data/hexcolor_vf/test_palettes_rgb.pkl')
 
     train_dataset = PAT_Dataset(train_name_path, train_palette_path, input_dict)
@@ -102,9 +106,12 @@ class Image_Dataset(data.Dataset):
     def __getitem__(self, idx):
         return self.image_data[idx], self.pal_data[idx]
 
-def test_loader(dataset, batch_size, input_dict):
+def test_loader(dataset, batch_size, input_dict, language):
     if dataset == 'bird256':
-        txt_path = './data/hexcolor_vf/test_names.pkl'
+        if language == 'kor':
+            txt_path = './data/hexcolor_vf/kor_test_names.pkl'
+        else:
+            txt_path = './data/hexcolor_vf/test_names.pkl'
         pal_path = './data/hexcolor_vf/test_palettes_rgb.pkl'
         img_path = './data/bird256/test_palette/test_images_origin.txt'
         test_dataset = Test_Dataset(input_dict, txt_path, pal_path, img_path)

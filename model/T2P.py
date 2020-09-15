@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from util import *
+from siren_pytorch import Sine
 
 class CA_NET(nn.Module):
 
@@ -12,10 +13,12 @@ class CA_NET(nn.Module):
         self.c_dim = 150
         self.fc = nn.Linear(self.t_dim, self.c_dim*2, bias=True)
         self.relu = nn.ReLU()
+        self.sine = Sine()
 
     # VAE 오토 인코더 특징 추출
     def encode(self, text_embedding):
-        x = self.relu(self.fc(text_embedding))
+        # x = self.relu(self.fc(text_embedding))
+        x = self.sine(self.fc(text_embedding))
         mu = x[:, :, :self.c_dim]
         logvar = x[:, :, :self.c_dim] # self.c_dim: 다른 이유를 모르겠음
         return mu, logvar
@@ -25,10 +28,6 @@ class CA_NET(nn.Module):
         std = logvar.mul(0.5).exp_()
         std_size = std.size()
         eps = torch.cuda.FloatTensor(std.size()).normal_(0.0, 1)
-        # if torch.device == 'cpu':
-        #     eps = torch.FloatTensor(std.size()).normal_(0.0, 1) # 여기 하다 맘
-        # else:
-        #     eps = torch.cuda.FloatTensor(std.size()).normal_(0.0, 1)
         return eps * std + mu
 
     def forward(self, text_embedding):
@@ -39,16 +38,24 @@ class CA_NET(nn.Module):
 
 class EncoderRNN(nn.Module):
     # 왜인진 모르나 Pre_emb = None 으로 되어 있음, 일단 None 삭제함
-    def __init__(self, input_size, hidden_size, n_layer, dropout_p, Pre_emb):
+    def __init__(self, input_size, hidden_size, n_layer, dropout_p, Pre_emb, language):
         super(EncoderRNN, self).__init__()
 
         self.hidden_size = hidden_size
         self.n_layers = n_layer
         # util 에서 Embed 불러옴
-        # input vocab_size, embed_dim, Pre_emb, train_emb
-        self.embed = Embed(input_size, 300, Pre_emb, True)
-        # input input_size, hidden_size, num_layer
-        self.gru = nn.GRU(300, hidden_size, n_layer, dropout=dropout_p)
+        if language == 'kor':
+            # fasttext 썼는데 905 단어만 걸려서 기존것으로 대체 // 기존은 1041/1049
+            # input vocab_size, embed_dim, Pre_emb, train_emb
+            self.embed = Embed(input_size, 100, Pre_emb, True)
+            # input input_size, hidden_size, num_layer
+            self.gru = nn.GRU(100, hidden_size, n_layer, dropout=dropout_p)
+        else:
+            # input vocab_size, embed_dim, Pre_emb, train_emb
+            self.embed = Embed(input_size, 300, Pre_emb, True)
+            # input input_size, hidden_size, num_layer
+            self.gru = nn.GRU(300, hidden_size, n_layer, dropout=dropout_p)
+
         # 위에 있음
         self.ca_net = CA_NET()
 
@@ -78,8 +85,11 @@ class AttnDecoderRNN(nn.Module):
         self.gru = nn.GRUCell(self.hidden_size + self.palette_dim, hidden_size)
 
         self.out = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size), nn.ReLU(inplace=True),
-            nn.BatchNorm1d(hidden_size), nn.Linear(hidden_size, self.palette_dim))
+            nn.Linear(hidden_size, hidden_size*2), Sine(), nn.BatchNorm1d(hidden_size*2),
+            nn.Linear(hidden_size*2, hidden_size), Sine(), nn.BatchNorm1d(hidden_size),
+            nn.Linear(hidden_size, self.palette_dim))
+            # nn.Linear(hidden_size, hidden_size), nn.ReLU(inplace=True),
+            # nn.BatchNorm1d(hidden_size), nn.Linear(hidden_size, self.palette_dim))
 
     def forward(self, last_palette, last_decoder_hidden, encoder_outputs, each_input_size, i):
 
@@ -114,24 +124,25 @@ class Attn(nn.Module):
         self.attn_h = nn.Linear(self.hidden_size, self.hidden_size)
         self.attn_energey = nn.Linear(self.hidden_size, 1)
         self.sigmoid = nn.Sigmoid()
+        self.sine = Sine()
 
     def forward(self, hidden, encoder_output, each_size):
         seq_len = encoder_output.size(0)
         batch_size = encoder_output.size(1)
-        #cpu 환경 일단 지원
         attn_energies = torch.zeros(seq_len, batch_size, 1).cuda()
 
         for i in range(seq_len):
             attn_energies[i] = self.score(hidden, encoder_output[i])
 
-        attn_energies = self.softmax(attn_energies)
+        attn_energies = self.softmax(attn_energies) # (seq_len, batch_size, 1)
         return attn_energies.permute(1, 2, 0) # 순서 바꿈, batch_size, 1, seq_len
 
     def score(self, hidden, encoder_output):
         # 뒤의 _는 기존에 파이썬 명령어가 있을 때 충돌을 피하기 위해 사용
         encoder_ = self.attn_e(encoder_output)
         hidden_ = self.attn_h(hidden)
-        energy = self.attn_energey(self.sigmoid(encoder_ + hidden_))
+        # energy = self.attn_energey(self.sigmoid(encoder_ + hidden_))
+        energy = self.attn_energey(self.sine(encoder_ + hidden_))
 
         return energy
 
