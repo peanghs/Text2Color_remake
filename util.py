@@ -3,7 +3,8 @@ import torch.nn as nn
 import numpy as np
 import warnings
 from skimage.color import lab2rgb, rgb2lab
-
+import csv
+import matplotlib.pyplot as plt
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -41,8 +42,10 @@ def load_pretrained_embedding(dictionary, embed_file, embed_dim):
             tokens = line.split(' ')
             word = tokens[0]
             # 공백이 자꾸 들어가서 그냥 301으로 자름 원래는 [1:]
-            entries = tokens[1:]
+            entries = tokens[1:301]
             if word == '<unk>':
+                continue
+            if word == '879129': # fasttext 첫줄 그냥 넘기기
                 continue
             pretrained_embed[word] = entries
         f.close()
@@ -50,13 +53,17 @@ def load_pretrained_embedding(dictionary, embed_file, embed_dim):
     vocab_size = len(dictionary) + 2
     Pre_emb = np.random.randn(vocab_size, embed_dim).astype('float32')
     n = 0
+    none_word = []
     for word, index in dictionary.items():
         if word in pretrained_embed:
             Pre_emb[index, :] = pretrained_embed[word]
             n += 1
+        else:
+            none_word.append(word)
 
     print(f"Glove 임베딩에서 {n}/{vocab_size} 단어가 초기화 되었습니다")
-    return Pre_emb
+    # glove 3892 fasttext 4510
+    return Pre_emb, none_word # 안나온 단어 추가
 
 class Embed(nn.Module):
     #T2P 에서 모델에서 임베딩 계산시 사용
@@ -74,7 +81,31 @@ class Embed(nn.Module):
             self.embed.requires_grad = False
 
     def forward(self, doc):
-        # doc 에 임베딩 업데이트
+        # ------------ 임베딩 확인용 코드 ----------------
+        # doc 비교용 doc_ori
+        doc_ori = doc
+        doc_line_1 = doc_ori[0, :]
+        doc_line_2 = doc_ori[1, :]
+        doc_line_2_1 = torch.zeros(16, dtype=torch.int64).to(device='cuda')
+        doc_line_2_2 = torch.zeros(16, dtype=torch.int64).to(device='cuda')
+        doc_line_2_3 = torch.zeros(16, dtype=torch.int64).to(device='cuda')
+        doc_line_2_1[0] = doc_line_2[0]
+        doc_line_2_2[0] = doc_line_2[1]
+        doc_line_2_3[0] = doc_line_2[2]
+
+        doc_line_1 = self.embed(doc_line_1)
+        doc_line_2 = self.embed(doc_line_2)
+        doc_line_2_1 = self.embed(doc_line_2_1)
+        doc_line_2_2 = self.embed(doc_line_2_2)
+        doc_line_2_3 = self.embed(doc_line_2_3)
+        # 여기서 text_embeddings에서 찾은 인풋 내 단어별 임베딩 id가 임베딩 실제 값으로 변환
+        # 0은 (-0.6999, 0.4942..)
+        # 공산주의 (0.1214, -0.0377..)
+        # 어(-0.6686, 0.6350) 두운 (-0.0978, 0.0171) 네온 (-0.0443, 0.3061)
+        # doc(배치 수, 최대 단어 길이, 임베딩)(32, 16, 300) 에서
+        # (0,0,300) ->  공산주의(나머지 0,1:16,300 은 0) (1,0,300) -> 어 (1,1,300) -> 두운
+        # ------------ 임베딩 확인용 코드 끝 ----------------
+
         doc = self.embed(doc)
         return doc
 
@@ -87,7 +118,7 @@ def process_image(image_data, batch_size, imsize):
     images_np = image_data.numpy().transpose((0, 2, 3, 1))
 
     for k in range(batch_size):
-        img_lab = rgb2lab(images_np[k], illuminant='D50')
+        img_lab = rgb2lab(images_np[k], illuminant='D55') #d50
         img_l = img_lab[:, :, 0] / 100
         input[k] = torch.from_numpy(np.expand_dims(img_l, 0))
 
@@ -160,7 +191,18 @@ def KL_loss(mu, logvar):
 def lab2rgb_1d(in_lab, clip=True):
     warnings.filterwarnings("ignore")
 
-    tmp_rgb = lab2rgb(in_lab[np.newaxis, np.newaxis, :], illuminant='D50').flatten() # 위에서 지웠으므로.. illuminant='D50'
+    tmp_rgb = lab2rgb(in_lab[np.newaxis, np.newaxis, :], illuminant='D55').flatten() # 위에서 지웠으므로.. illuminant='D50'
     if clip:
         tmp_rgb = np.clip(tmp_rgb, 0, 1)
     return tmp_rgb
+
+def write_txt(list, fname) :
+    none_word_list = []
+    print('-----없는 단어 저장 리스트-----')
+    with open(fname, 'w', encoding='UTF-8') as file:
+        for n, a in enumerate(list):
+            a = a + "\n"
+            file.write(a)
+            none_word_list.append(a)
+    print(none_word_list)
+    print('-----없는 단어 저장 완료-----')

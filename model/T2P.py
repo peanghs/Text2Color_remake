@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from util import *
-from siren_pytorch import Sine
 
 class CA_NET(nn.Module):
 
@@ -13,12 +12,10 @@ class CA_NET(nn.Module):
         self.c_dim = 150
         self.fc = nn.Linear(self.t_dim, self.c_dim*2, bias=True)
         self.relu = nn.ReLU()
-        self.sine = Sine()
 
     # VAE 오토 인코더 특징 추출
     def encode(self, text_embedding):
-        # x = self.relu(self.fc(text_embedding))
-        x = self.sine(self.fc(text_embedding))
+        x = self.relu(self.fc(text_embedding))
         mu = x[:, :, :self.c_dim]
         logvar = x[:, :, :self.c_dim] # self.c_dim: 다른 이유를 모르겠음
         return mu, logvar
@@ -44,8 +41,14 @@ class EncoderRNN(nn.Module):
         self.hidden_size = hidden_size
         self.n_layers = n_layer
         # util 에서 Embed 불러옴
-        if language == 'kor':
-            # fasttext 썼는데 905 단어만 걸려서 기존것으로 대체 // 기존은 1041/1049
+        if language == 'kor_ft':
+            # fasttext
+            # input vocab_size, embed_dim, Pre_emb, train_emb
+            self.embed = Embed(input_size, 300, Pre_emb, True)
+            # input input_size, hidden_size, num_layer
+            self.gru = nn.GRU(300, hidden_size, n_layer, dropout=dropout_p)
+        elif language == 'kor_gl':
+            # fasttext
             # input vocab_size, embed_dim, Pre_emb, train_emb
             self.embed = Embed(input_size, 100, Pre_emb, True)
             # input input_size, hidden_size, num_layer
@@ -60,7 +63,11 @@ class EncoderRNN(nn.Module):
         self.ca_net = CA_NET()
 
     def forward(self, word_inputs, hidden):
-        embedded = self.embed(word_inputs).transpose(0,1)
+        # ori 는 임베딩 보려고 추가
+        embedded_ori = self.embed(word_inputs)
+        # (최대 단어 길이, 배치 수, 임베딩) 각 문단(32개)의 첫 단어들이 0,32,300 에 들어감
+        # [[공산주의 * 300 ], [어 * 300]...]  [[0*300],[두운*300]...] * 16(최대 길이 만큼)
+        embedded = embedded_ori.transpose(0,1)
         output, hidden = self.gru(embedded, hidden)
         # text_embedding 에 output이 들어감
         c_code, mu, logvar = self.ca_net(output)
@@ -85,11 +92,8 @@ class AttnDecoderRNN(nn.Module):
         self.gru = nn.GRUCell(self.hidden_size + self.palette_dim, hidden_size)
 
         self.out = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size*2), Sine(), nn.BatchNorm1d(hidden_size*2),
-            nn.Linear(hidden_size*2, hidden_size), Sine(), nn.BatchNorm1d(hidden_size),
-            nn.Linear(hidden_size, self.palette_dim))
-            # nn.Linear(hidden_size, hidden_size), nn.ReLU(inplace=True),
-            # nn.BatchNorm1d(hidden_size), nn.Linear(hidden_size, self.palette_dim))
+            nn.Linear(hidden_size, hidden_size), nn.ReLU(inplace=True),
+            nn.BatchNorm1d(hidden_size), nn.Linear(hidden_size, self.palette_dim))
 
     def forward(self, last_palette, last_decoder_hidden, encoder_outputs, each_input_size, i):
 
@@ -124,7 +128,7 @@ class Attn(nn.Module):
         self.attn_h = nn.Linear(self.hidden_size, self.hidden_size)
         self.attn_energey = nn.Linear(self.hidden_size, 1)
         self.sigmoid = nn.Sigmoid()
-        self.sine = Sine()
+        self.relu = nn.ReLU()
 
     def forward(self, hidden, encoder_output, each_size):
         seq_len = encoder_output.size(0)
@@ -141,8 +145,7 @@ class Attn(nn.Module):
         # 뒤의 _는 기존에 파이썬 명령어가 있을 때 충돌을 피하기 위해 사용
         encoder_ = self.attn_e(encoder_output)
         hidden_ = self.attn_h(hidden)
-        # energy = self.attn_energey(self.sigmoid(encoder_ + hidden_))
-        energy = self.attn_energey(self.sine(encoder_ + hidden_))
+        energy = self.attn_energey(self.sigmoid(encoder_ + hidden_))
 
         return energy
 
